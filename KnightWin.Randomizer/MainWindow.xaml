@@ -1,0 +1,1024 @@
+<Window x:Class="KnightWin.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ctrl="clr-namespace:KnightWin.Controls"
+        xmlns:core="clr-namespace:KnightWin.Core"
+        Title="KnightWin Randomizer"
+        Width="1180" Height="780" MinWidth="900" MinHeight="620"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        Background="Transparent"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Ideal">
+
+    <Window.Resources>
+        <core:BoolToVisibility x:Key="BoolToVis" />
+        <core:InverseBoolToVisibility x:Key="NotBoolToVis" />
+
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Background" Value="{DynamicResource CardBg}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource CardStroke}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="16" />
+        </Style>
+        <Style x:Key="RowLabel" TargetType="TextBlock" BasedOn="{StaticResource Body}">
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="SectionLabel" TargetType="TextBlock" BasedOn="{StaticResource Meta}">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource TextTertiary}" />
+        </Style>
+
+        <!-- row outcome marker: tick when renamed, cross when it failed, nothing while pending -->
+        <Style x:Key="RowMark" TargetType="Border">
+            <Setter Property="Width" Value="18" />
+            <Setter Property="Height" Value="18" />
+            <Setter Property="CornerRadius" Value="9" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,10,0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsDone}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource Success}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsFailed}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource Danger}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- folder name under a file row; hidden entirely for single-folder batches -->
+        <Style x:Key="FolderTag" TargetType="TextBlock" BasedOn="{StaticResource Meta}">
+            <Setter Property="FontSize" Value="10.5" />
+            <Setter Property="Opacity" Value="0.72" />
+            <Setter Property="Margin" Value="0,1,0,0" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding FolderLabel}" Value="">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <!--
+      The window is ONE acrylic surface. There is no separate title bar strip and no separate
+      navigation pane rectangle any more: the title bar and the rail share a single continuous
+      chrome layer (ChromeSurface) that runs down the left edge and across the top, so the two
+      read as one piece of glass instead of three stacked panels.
+    -->
+    <!-- Keep the HWND fully painted. Rounded XAML borders on a NON-layered WPF window leave
+         unpainted (black) pixels at the corners; the native HWND region owns the shape. -->
+    <Border x:Name="RootBorder" BorderBrush="Transparent" BorderThickness="0"
+            CornerRadius="0" Background="{DynamicResource WindowBg}">
+        <Border CornerRadius="0" ClipToBounds="True">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- One WPF-drawn L, with a 12-DIP concave rounded transition from
+                 titlebar to rail. This draws each translucent pixel ONCE; four
+                 overlapping Borders would create seams at the corner. -->
+            <ctrl:ChromeSurface x:Name="ChromeFull" Grid.RowSpan="2"
+                                NavWidth="{Binding ActualWidth, ElementName=NavPane}"
+                                TitleHeight="40" InsideRadius="12"
+                                ChromeBrush="{DynamicResource ChromeBg}"
+                                AccentBrush="{DynamicResource ChromeTint}"
+                                IsHitTestVisible="False" />
+
+            <!-- title bar -->
+            <Grid x:Name="TitleBar" Grid.Row="0" Background="Transparent"
+                  MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0">
+                    <Border Width="20" Height="20" CornerRadius="5" Background="#F20B0E16" Margin="8,0,0,0">
+                        <Image Source="Assets/app-icon.png" Margin="1"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                    </Border>
+                    <TextBlock Text="KnightWin" Style="{StaticResource Body}" FontWeight="SemiBold"
+                               Margin="9,0,0,0" VerticalAlignment="Center" />
+                    <TextBlock Text="Randomizer" Style="{StaticResource Body}"
+                               Foreground="{DynamicResource TextTertiary}" Margin="5,0,0,0"
+                               VerticalAlignment="Center" />
+                    <Border Background="{DynamicResource ChipBg}" CornerRadius="4" Padding="6,2" Margin="9,0,0,0"
+                            VerticalAlignment="Center">
+                        <TextBlock x:Name="VersionBadge" Text="v1.0.0" FontSize="10.5"
+                                   Foreground="{DynamicResource TextTertiary}"
+                                   FontFamily="{StaticResource UiFont}" />
+                    </Border>
+                </StackPanel>
+
+                <!-- Borderless, edge-aligned Windows-style caption targets. The buttons
+                     fill the shortened titlebar; only their hover/pressed fills paint. -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="MinBtn" Style="{StaticResource ChromeButton}" ToolTip="Minimise"
+                            Click="MinBtn_Click">
+                        <Path Data="{StaticResource GeoMin}" Style="{StaticResource IconPath}"
+                              VerticalAlignment="Center" HorizontalAlignment="Center" />
+                    </Button>
+                    <Button x:Name="MaxBtn" Style="{StaticResource ChromeButton}" ToolTip="Maximise"
+                            Click="MaxBtn_Click">
+                        <Path x:Name="MaxIcon" Data="{StaticResource GeoMax}" Style="{StaticResource IconPath}"
+                              VerticalAlignment="Center" HorizontalAlignment="Center" />
+                    </Button>
+                    <Button x:Name="CloseBtn" Style="{StaticResource CloseButton}" ToolTip="Close"
+                            Click="CloseBtn_Click">
+                        <Path Data="{StaticResource GeoClose}" Style="{StaticResource IconPath}"
+                              VerticalAlignment="Center" HorizontalAlignment="Center" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+
+            <!-- body -->
+            <Grid Grid.Row="1" Background="Transparent">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- navigation pane -->
+                <Border x:Name="NavPane" Grid.Column="0" Width="220" Background="Transparent"
+                        Padding="0,4,0,10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0">
+                            <!-- Keep the app identity at the far left of the title bar;
+                                 the pane toggle lives directly BELOW it in the rail. -->
+                            <Button x:Name="NavToggleBtn" Style="{StaticResource IconButton}"
+                                    Width="38" Height="30" HorizontalAlignment="Left" Margin="6,0,0,4"
+                                    ToolTip="Collapse or expand the navigation pane" Click="NavToggle_Click">
+                                <Path x:Name="NavToggleIcon" Data="{StaticResource GeoMenu}"
+                                      Style="{StaticResource IconPath}" StrokeThickness="1.25"
+                                      VerticalAlignment="Center" HorizontalAlignment="Center" />
+                            </Button>
+                            <TextBlock x:Name="NavHeader" Text="WORKSPACE" Style="{StaticResource SectionLabel}"
+                                       Margin="16,4,0,6" />
+                            <RadioButton x:Name="NavRandomize" Style="{StaticResource NavItem}" GroupName="nav"
+                                         IsChecked="True" Checked="Nav_Checked" Tag="randomize">
+                                <StackPanel Orientation="Horizontal" Margin="12,0,0,0">
+                                    <Path Data="{StaticResource GeoShuffle}" Style="{StaticResource IconPath}"
+                                          Width="16" Height="16" Stretch="None" VerticalAlignment="Center"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
+                                    <TextBlock x:Name="LblRandomize" Text="Randomize" Margin="12,0,0,0"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+                            </RadioButton>
+
+                        </StackPanel>
+
+                        <!-- bottom: settings -->
+                        <StackPanel Grid.Row="2">
+                            <Border x:Name="NavBottomRule" Height="0" Margin="12,0,12,6" />
+                            <RadioButton x:Name="NavSettings" Style="{StaticResource NavItem}" GroupName="nav"
+                                         Checked="Nav_Checked" Tag="settings">
+                                <StackPanel Orientation="Horizontal" Margin="12,0,0,0">
+                                    <Path Data="{StaticResource GeoGear}" Style="{StaticResource IconPath}"
+                                          Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                                          StrokeThickness="1.15"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
+                                    <TextBlock x:Name="LblSettings" Text="Settings" Margin="12,0,0,0"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+                            </RadioButton>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- pages: this surface covers the right-hand part of the chrome slab, so what
+                     remains visible of that slab is the rail + title bar as one continuous L -->
+                <Grid Grid.Column="1">
+                    <Grid.RowDefinitions>
+                        <!-- The screenshot's tighter title-to-heading gap: 16 DIP inset
+                             leaves the page headings clear of the rounded chrome junction. -->
+                        <RowDefinition Height="16" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <!-- This column already begins AFTER NavPane. No additional rail-width
+                         margin: it created a 220-DIP uncovered strip and a hard vertical seam. -->
+                    <!-- The acrylic root is the SINGLE page base. An opaque PageSurface
+                         covered the desktop entirely in v1.9.6. This transparent element
+                         preserves layout and can receive a fallback brush on old systems. -->
+                    <Border Grid.RowSpan="2" x:Name="PageSurface"
+                            Background="Transparent" CornerRadius="0" />
+                    <Grid Grid.Row="1" Margin="16,0,16,14">
+
+                    <!-- PAGE: randomize -->
+                    <Grid x:Name="PageRandomize">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <!-- page heading -->
+                        <StackPanel Grid.Row="0" Margin="2,0,0,12">
+                            <TextBlock x:Name="PageTitle" Text="Randomize" Style="{StaticResource H1}" FontSize="22" />
+                            <TextBlock x:Name="PageSub" Text="Pick a naming style, drop in files, rename in place."
+                                       Style="{StaticResource Meta}" Margin="0,2,0,0" />
+                        </StackPanel>
+
+                        <!-- hero: wheel and generated name -->
+                        <Border x:Name="PreviewGlow" Grid.Row="1" Style="{StaticResource Card}"
+                                Padding="7,6" CornerRadius="9" Margin="0,8,0,0">
+                            <Border.Background>
+                                <!-- The same translucent accent wash, now diffused and drifting
+                                     across the slim preview instead of stuck in one corner. -->
+                                <RadialGradientBrush Center="0.16,0.35" GradientOrigin="0.16,0.35"
+                                                     RadiusX="0.38" RadiusY="0.95">
+                                    <GradientStop Color="{DynamicResource AccentSoftColor}" Offset="0" />
+                                    <GradientStop Color="Transparent" Offset="1" />
+                                </RadialGradientBrush>
+                            </Border.Background>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <Grid x:Name="PreviewDisc" Width="34" Height="34" Margin="0,0,10,0" VerticalAlignment="Center">
+                                    <Border CornerRadius="17" Background="{DynamicResource FieldBg}"
+                                            BorderBrush="{DynamicResource CardStroke}" BorderThickness="1" />
+                                    <ctrl:WheelControl x:Name="Wheel" Width="30" Height="30"
+                                                       IsHitTestVisible="False"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <Border Width="12" Height="12" CornerRadius="6" Background="#F20B0E16"
+                                            HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <Image Source="Assets/logo.png" Margin="2"
+                                               RenderOptions.BitmapScalingMode="HighQuality" />
+                                    </Border>
+                                </Grid>
+
+                                <Border Grid.Column="1" CornerRadius="6" Background="{DynamicResource FieldBg}"
+                                        BorderBrush="{DynamicResource FieldStroke}" BorderThickness="1"
+                                        Height="34" VerticalAlignment="Center">
+                                    <Grid Margin="14,0,14,0">
+                                        <TextBlock x:Name="PreviewText" Text="—"
+                                                   FontFamily="Cascadia Mono, Consolas, Segoe UI"
+                                                   FontSize="14" FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextPrimary}" />
+                                    </Grid>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- mode cards -->
+                        <UniformGrid Grid.Row="2" Columns="3" Margin="0,8,0,0">
+                            <RadioButton x:Name="TabRandom" Style="{StaticResource ModeCardSlim}" GroupName="mode"
+                                         IsChecked="True" Checked="Mode_Checked" Tag="0" Margin="0,0,4,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <Path Data="{StaticResource GeoShuffle}" Style="{StaticResource IconPath}"
+                                          Width="15" Height="15" Stretch="None" VerticalAlignment="Center"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
+                                    <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="Total random" FontWeight="SemiBold" FontSize="12.5" />
+                                        <TextBlock Text="Characters only" Style="{StaticResource Meta}" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </RadioButton>
+
+                            <RadioButton x:Name="TabDate" Style="{StaticResource ModeCardSlim}" GroupName="mode"
+                                         Checked="Mode_Checked" Tag="1" Margin="4,0,4,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <Path Data="{StaticResource GeoCalendar}" Style="{StaticResource IconPath}"
+                                          Width="15" Height="15" Stretch="None" VerticalAlignment="Center"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
+                                    <StackPanel Margin="11,0,0,0">
+                                        <TextBlock Text="Date + random" FontWeight="SemiBold" FontSize="12.5" />
+                                        <TextBlock Text="Sortable by day" Style="{StaticResource Meta}" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </RadioButton>
+
+                            <RadioButton x:Name="TabCustom" Style="{StaticResource ModeCardSlim}" GroupName="mode"
+                                         Checked="Mode_Checked" Tag="2" Margin="4,0,0,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <Path Data="{StaticResource GeoTag}" Style="{StaticResource IconPath}"
+                                          Width="15" Height="15" Stretch="None" VerticalAlignment="Center"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
+                                    <StackPanel Margin="11,0,0,0">
+                                        <TextBlock Text="Custom + random" FontWeight="SemiBold" FontSize="12.5" />
+                                        <TextBlock Text="Your own prefix" Style="{StaticResource Meta}" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </RadioButton>
+                        </UniformGrid>
+
+                        <!-- options + queue -->
+                        <Grid Grid.Row="3" Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="330" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0" Style="{StaticResource Card}">
+                                <Grid Background="Transparent">
+                                <!-- Keep the ScrollViewer viewport unpadded. WPF's viewport clipped
+                                     its padded interior at a translucent physical-pixel seam. Move
+                                     spacing to the transparent child instead; the viewport and its
+                                     scrollbar gutter sit over a fully opaque parent. -->
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0"
+                                              Background="Transparent">
+                                    <StackPanel Margin="4,0,4,0">
+                                        <!-- mode specific fields -->
+                                        <StackPanel x:Name="DateBlock" Visibility="Collapsed">
+                                            <TextBlock Text="Date format" Style="{StaticResource RowLabel}" FontSize="12"
+                                                       Margin="0,0,0,6" />
+                                            <ComboBox x:Name="DateFmt" Style="{StaticResource FluentCombo}"
+                                                      SelectionChanged="DateFmt_SelectionChanged">
+                                                <ComboBoxItem Content="2026-11-15  (yyyy-MM-dd)" Tag="yyyy-MM-dd" />
+                                                <ComboBoxItem Content="20261115  (yyyyMMdd)" Tag="yyyyMMdd" />
+                                                <ComboBoxItem Content="15-11-2026  (dd-MM-yyyy)" Tag="dd-MM-yyyy" />
+                                                <ComboBoxItem Content="Nov 15  (MMM dd)" Tag="MMM dd" />
+                                                <ComboBoxItem Content="2026-11-15_14h30" Tag="yyyy-MM-dd_HH\hmm" />
+                                            </ComboBox>
+                                        </StackPanel>
+
+                                        <StackPanel x:Name="CustomBlock" Visibility="Collapsed">
+                                            <TextBlock Text="Prefix" Style="{StaticResource RowLabel}" FontSize="12"
+                                                       Margin="0,0,0,6" />
+                                            <TextBox x:Name="PrefixBox" Style="{StaticResource FluentField}"
+                                                     TextChanged="PrefixBox_TextChanged" Tag="e.g. Knight" />
+                                        </StackPanel>
+
+                                        <!-- character set -->
+                                        <TextBlock Text="Character set" Style="{StaticResource RowLabel}" FontSize="12"
+                                                   Margin="0,12,0,7" />
+                                        <UniformGrid Columns="4" Margin="0,0,0,2">
+                                            <Button x:Name="ChipLower" Style="{StaticResource ChipToggle}" Tag="lower"
+                                                    Content="a-z" Click="Chip_Click" Margin="0,0,3,0" ToolTip="Lowercase letters" />
+                                            <Button x:Name="ChipUpper" Style="{StaticResource ChipToggle}" Tag="upper"
+                                                    Content="A-Z" Click="Chip_Click" Margin="2,0,2,0" ToolTip="Uppercase letters" />
+                                            <Button x:Name="ChipDigits" Style="{StaticResource ChipToggle}" Tag="digits"
+                                                    Content="0-9" Click="Chip_Click" Margin="2,0,2,0" ToolTip="Digits" />
+                                            <Button x:Name="ChipSymbols" Style="{StaticResource ChipToggle}" Tag="symbols"
+                                                    Content="- _" Click="Chip_Click" Margin="3,0,0,0" ToolTip="Symbols" />
+                                        </UniformGrid>
+
+                                        <!-- separator -->
+                                        <Grid Margin="0,10,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="122" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Separator" Style="{StaticResource RowLabel}" />
+                                            <ComboBox Grid.Column="1" x:Name="SepBox" Style="{StaticResource FluentCombo}"
+                                                      Height="32" SelectionChanged="SepBox_SelectionChanged">
+                                                <ComboBoxItem Content="_  underscore" Tag="_" />
+                                                <ComboBoxItem Content="-  hyphen" Tag="-" />
+                                                <ComboBoxItem Content="none" Tag="" />
+                                                <ComboBoxItem Content="space" Tag=" " />
+                                            </ComboBox>
+                                        </Grid>
+
+                                        <!-- length -->
+                                        <Grid Margin="0,12,0,0">
+                                            <TextBlock Text="Random length" Style="{StaticResource RowLabel}" />
+                                            <Border Background="{DynamicResource ChipBg}" CornerRadius="4" Padding="7,1"
+                                                    HorizontalAlignment="Right">
+                                                <TextBlock x:Name="LenValue" Text="10" FontSize="11.5" FontWeight="SemiBold"
+                                                           FontFamily="{StaticResource UiFont}"
+                                                           Foreground="{DynamicResource Accent}" />
+                                            </Border>
+                                        </Grid>
+                                        <Slider x:Name="LenSlider" Style="{StaticResource FluentSlider}"
+                                                Minimum="6" Maximum="16" TickFrequency="1" IsSnapToTickEnabled="True"
+                                                Value="10" ValueChanged="LenSlider_ValueChanged" Margin="0,2,0,0" />
+                                        <Grid>
+                                            <TextBlock Text="6" Style="{StaticResource Meta}" />
+                                            <TextBlock Text="16" Style="{StaticResource Meta}" HorizontalAlignment="Right" />
+                                        </Grid>
+
+                                        <Border Height="0" Margin="0,12" />
+
+                                        <Grid>
+                                            <StackPanel>
+                                                <TextBlock Text="Expand folders" Style="{StaticResource RowLabel}" FontSize="12" />
+                                                <TextBlock Text="Picking a folder adds the files inside"
+                                                           Style="{StaticResource Meta}" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                            <CheckBox x:Name="FolderMode" Style="{StaticResource FluentSwitch}"
+                                                      HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                      Checked="FolderMode_Changed" Unchecked="FolderMode_Changed" />
+                                        </Grid>
+
+                                        <Grid Margin="0,12,0,0" x:Name="SubfoldersRow">
+                                            <StackPanel>
+                                                <TextBlock Text="Include subfolders" Style="{StaticResource RowLabel}" FontSize="12" />
+                                                <TextBlock Text="Walk the whole folder tree"
+                                                           Style="{StaticResource Meta}" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                            <CheckBox x:Name="SubfolderMode" Style="{StaticResource FluentSwitch}"
+                                                      HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                      Checked="SubfolderMode_Changed" Unchecked="SubfolderMode_Changed" />
+                                        </Grid>
+                                    </StackPanel>
+                                </ScrollViewer>
+                                <!-- No paint-only seals: they formed a visible line even after
+                                     the content padding was moved away from the viewport. -->
+                                </Grid>
+                            </Border>
+
+                            <!-- queue -->
+                            <Grid x:Name="QueueCard" Grid.Column="2">
+                            <Border Style="{StaticResource Card}" Padding="0">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <Grid Grid.Row="0" Margin="16,14,16,8">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Grid>
+                                            <StackPanel>
+                                                <TextBlock Text="File queue" Style="{StaticResource H2}" />
+                                                <TextBlock x:Name="QueueSub" Text="Drop files here or add them manually"
+                                                           Style="{StaticResource Meta}" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0">
+                                            <Button x:Name="AddBtn" Style="{StaticResource SubButton}" Padding="10,6"
+                                                    Click="AddBtn_Click" ToolTip="Add files  (Ctrl+O)">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Path Data="{StaticResource GeoPlus}" Style="{StaticResource IconPath}"
+                                                          Width="12" Height="12" Stretch="None" Margin="0,0,7,0"
+                                                          VerticalAlignment="Center" />
+                                                    <TextBlock Text="Add files" FontSize="12.5" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button x:Name="AddFolderBtn" Style="{StaticResource SubButton}" Padding="10,6"
+                                                    Margin="6,0,0,0" Click="AddFolderBtn_Click"
+                                                    ToolTip="Add every file in a folder  (Ctrl+Shift+O)">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Path Data="{StaticResource GeoFolder}" Style="{StaticResource IconPath}"
+                                                          Width="13" Height="13" Stretch="Uniform" Margin="0,0,7,0"
+                                                          VerticalAlignment="Center" />
+                                                    <TextBlock Text="Add folder" FontSize="12.5" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button x:Name="ReviewBtn" Style="{StaticResource SubButton}" Padding="10,6"
+                                                    Margin="6,0,0,0" Click="ReviewBtn_Click"
+                                                    ToolTip="See current and new names side by side">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="Review" FontSize="12.5" VerticalAlignment="Center" />
+                                                    <Path Data="{StaticResource GeoChevronRight}" Style="{StaticResource IconPath}"
+                                                          Width="9" Height="9" Stretch="None" Margin="6,0,0,0"
+                                                          VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button x:Name="ClearBtn" Style="{StaticResource SubButton}" Padding="9,6"
+                                                    Margin="6,0,0,0" Click="ClearBtn_Click" ToolTip="Clear the queue">
+                                                <Path Data="{StaticResource GeoTrash}" Style="{StaticResource IconPath}"
+                                                      Width="12" Height="12" Stretch="None"
+                                                      VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                            </Button>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <Border Grid.Row="1" x:Name="DropZone" CornerRadius="6" Margin="10,0,10,0"
+                                            Background="Transparent" BorderBrush="Transparent" BorderThickness="1"
+                                            AllowDrop="True" DragOver="DropZone_DragOver" DragLeave="DropZone_DragLeave"
+                                            Drop="DropZone_Drop">
+                                        <Grid>
+                                            <ListBox x:Name="FileList" Background="Transparent" BorderThickness="0"
+                                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                     HorizontalContentAlignment="Stretch"
+                                                     VirtualizingPanel.IsVirtualizing="True"
+                                                     VirtualizingPanel.VirtualizationMode="Recycling">
+                                                <ListBox.ItemContainerStyle>
+                                                    <Style TargetType="ListBoxItem">
+                                                        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                                                        <Setter Property="Template">
+                                                            <Setter.Value>
+                                                                <ControlTemplate TargetType="ListBoxItem">
+                                                                    <Border x:Name="Bd" CornerRadius="5" Margin="0,1"
+                                                                            Background="Transparent" Padding="8,7">
+                                                                        <ContentPresenter />
+                                                                    </Border>
+                                                                    <ControlTemplate.Triggers>
+                                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                                            <Setter TargetName="Bd" Property="Background"
+                                                                                    Value="{DynamicResource ListHover}" />
+                                                                        </Trigger>
+                                                                        <Trigger Property="IsSelected" Value="True">
+                                                                            <Setter TargetName="Bd" Property="Background"
+                                                                                    Value="{DynamicResource AccentSoft}" />
+                                                                        </Trigger>
+                                                                    </ControlTemplate.Triggers>
+                                                                </ControlTemplate>
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                    </Style>
+                                                </ListBox.ItemContainerStyle>
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="*" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <Border Style="{StaticResource RowMark}"
+                                                                    ToolTip="{Binding Error}">
+                                                                <Grid>
+                                                                    <Path Data="{StaticResource GeoList}"
+                                                                          Stroke="{DynamicResource TextTertiary}" StrokeThickness="1.1"
+                                                                          Width="13" Height="13" Stretch="Uniform"
+                                                                          HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                                        <Path.Style>
+                                                                            <Style TargetType="Path">
+                                                                                <Style.Triggers>
+                                                                                    <DataTrigger Binding="{Binding IsDone}" Value="True">
+                                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                                    </DataTrigger>
+                                                                                    <DataTrigger Binding="{Binding IsFailed}" Value="True">
+                                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                                    </DataTrigger>
+                                                                                </Style.Triggers>
+                                                                            </Style>
+                                                                        </Path.Style>
+                                                                    </Path>
+                                                                    <Path Data="{StaticResource GeoCheck}"
+                                                                          Stroke="#FF0B1A12" StrokeThickness="1.5"
+                                                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                                          Width="9" Height="9" Stretch="Uniform"
+                                                                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                          Visibility="{Binding IsDone, Converter={StaticResource BoolToVis}}" />
+                                                                    <Path Data="{StaticResource GeoClose}"
+                                                                          Stroke="#FF20060A" StrokeThickness="1.4"
+                                                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                                          Width="8" Height="8" Stretch="Uniform"
+                                                                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                          Visibility="{Binding IsFailed, Converter={StaticResource BoolToVis}}" />
+                                                                </Grid>
+                                                            </Border>
+                                                            <StackPanel Grid.Column="1">
+                                                                <TextBlock Text="{Binding SourceName}" Style="{StaticResource Body}"
+                                                                           TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Text="{Binding TargetName}" Style="{StaticResource Meta}"
+                                                                           TextTrimming="CharacterEllipsis" Margin="0,2,0,0"
+                                                                           Foreground="{DynamicResource Accent}" />
+                                                                <TextBlock Text="{Binding FolderLabel}" Style="{StaticResource FolderTag}" />
+                                                                <TextBlock Text="{Binding Error}" Style="{StaticResource Meta}"
+                                                                           Foreground="{DynamicResource Danger}"
+                                                                           TextTrimming="CharacterEllipsis" Margin="0,2,0,0"
+                                                                           ToolTip="{Binding Error}"
+                                                                           Visibility="{Binding IsFailed, Converter={StaticResource BoolToVis}}" />
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+
+                                            <StackPanel x:Name="EmptyState" VerticalAlignment="Center"
+                                                        HorizontalAlignment="Center" IsHitTestVisible="False">
+                                                <Border Width="68" Height="68" CornerRadius="17" Background="#140B0E16"
+                                                        HorizontalAlignment="Center">
+                                                    <Image Source="Assets/app-icon.png" Margin="5"
+                                                           RenderOptions.BitmapScalingMode="HighQuality" />
+                                                </Border>
+                                                <TextBlock Text="Drop files or folders here" Style="{StaticResource Body}"
+                                                           HorizontalAlignment="Center" Margin="0,12,0,0"
+                                                           Foreground="{DynamicResource TextSecondary}" />
+                                                <TextBlock Text="The list previews every new name before you commit"
+                                                           Style="{StaticResource Meta}" HorizontalAlignment="Center"
+                                                           Margin="0,3,0,0" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+
+                                    <!-- Action-only footer; queue feedback stays by the File queue heading. -->
+                                    <Border Grid.Row="2" Padding="14,9,14,10">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                                <Button x:Name="UndoBtn" Style="{StaticResource SubButton}" Padding="11,7"
+                                                        Margin="0,0,8,0" Click="UndoBtn_Click" IsEnabled="False"
+                                                        ToolTip="Undo the last batch  (Ctrl+Z)">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <Path Data="{StaticResource GeoUndo}" Style="{StaticResource IconPath}"
+                                                              Width="14" Height="14" Stretch="None"
+                                                              Margin="0,0,6,0" VerticalAlignment="Center" />
+                                                        <TextBlock Text="Undo" FontSize="12.5" VerticalAlignment="Center" />
+                                                    </StackPanel>
+                                                </Button>
+                                                <Button x:Name="RenameBtn" Style="{StaticResource AccentButton}"
+                                                        Click="RenameBtn_Click" IsEnabled="False"
+                                                        ToolTip="Rename the queue  (Ctrl+R)">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <Path Data="{StaticResource GeoPencil}"
+                                                              Stroke="{Binding Path=(TextElement.Foreground), RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2"
+                                                              StrokeLineJoin="Round" Width="14" Height="14" Stretch="None"
+                                                              Margin="0,0,7,0" VerticalAlignment="Center" />
+                                                        <TextBlock Text="Rename files" FontWeight="SemiBold"
+                                                                   VerticalAlignment="Center" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </Grid>
+                            </Border>
+
+                                <!-- review sheet: same rows, current name -> new name, nothing renamed here -->
+                                <Border x:Name="ReviewSheet" CornerRadius="8" Margin="-1"
+                                        Background="{DynamicResource SheetBg}"
+                                        BorderBrush="{DynamicResource CardStroke}" BorderThickness="1"
+                                        Visibility="Collapsed">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <Grid Grid.Row="0" Margin="16,12,10,10">
+                                            <StackPanel>
+                                                <TextBlock Text="Review queue" Style="{StaticResource H2}" />
+                                                <TextBlock Text="Current name to new name, newest plan first."
+                                                           Style="{StaticResource Meta}" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                            <Button Style="{StaticResource SubButton}" Padding="9,6"
+                                                    HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                    Click="ReviewClose_Click" ToolTip="Back to the queue">
+                                                <Path Data="{StaticResource GeoClose}" Style="{StaticResource IconPath}"
+                                                      Width="10" Height="10" Stretch="None"
+                                                      VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                            </Button>
+                                        </Grid>
+                                        <Border Grid.Row="0" Height="1" Background="{DynamicResource Divider}"
+                                                VerticalAlignment="Bottom" />
+                                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="10,6,10,10">
+                                            <ItemsControl x:Name="ReviewList">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid Margin="4,3">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="*" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <Border Style="{StaticResource RowMark}" ToolTip="{Binding Error}">
+                                                                <Grid>
+                                                                    <Path Data="{StaticResource GeoList}"
+                                                                          Stroke="{DynamicResource TextTertiary}" StrokeThickness="1.1"
+                                                                          Width="13" Height="13" Stretch="Uniform"
+                                                                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                          Visibility="{Binding IsPending, Converter={StaticResource BoolToVis}}" />
+                                                                    <Path Data="{StaticResource GeoCheck}"
+                                                                          Stroke="#FF0B1A12" StrokeThickness="1.5"
+                                                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                                          Width="9" Height="9" Stretch="Uniform"
+                                                                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                          Visibility="{Binding IsDone, Converter={StaticResource BoolToVis}}" />
+                                                                    <Path Data="{StaticResource GeoClose}"
+                                                                          Stroke="#FF20060A" StrokeThickness="1.4"
+                                                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                                          Width="8" Height="8" Stretch="Uniform"
+                                                                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                          Visibility="{Binding IsFailed, Converter={StaticResource BoolToVis}}" />
+                                                                </Grid>
+                                                            </Border>
+                                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,4">
+                                                                <TextBlock Text="{Binding SourceName}" Style="{StaticResource Body}"
+                                                                           TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Text="{Binding FolderLabel}" Style="{StaticResource FolderTag}" />
+                                                            </StackPanel>
+                                                            <Path Grid.Column="2" Data="{StaticResource GeoChevronRight}"
+                                                                  Stroke="{DynamicResource TextTertiary}" StrokeThickness="1.1"
+                                                                  Width="12" Height="12" Stretch="None"
+                                                                  VerticalAlignment="Center" Margin="12,0" />
+                                                            <StackPanel Grid.Column="3" VerticalAlignment="Center" Margin="0,4">
+                                                                <TextBlock Text="{Binding TargetName}" Style="{StaticResource Body}"
+                                                                           Foreground="{DynamicResource Accent}"
+                                                                           TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Text="{Binding Error}" Style="{StaticResource Meta}"
+                                                                           Foreground="{DynamicResource Danger}"
+                                                                           TextTrimming="CharacterEllipsis" Margin="0,2,0,0"
+                                                                           Visibility="{Binding IsFailed, Converter={StaticResource BoolToVis}}" />
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+                        </Grid>
+                    </Grid>
+
+
+                    <!-- PAGE: settings -->
+                    <Grid x:Name="PageSettings" Visibility="Collapsed"
+                          Background="Transparent">
+                        <!-- The 4/12 DIP inset belongs to content, not the composited viewport.
+                             Padding on a DWM acrylic ScrollViewer cut wallpaper-coloured seams
+                             at its INNER content boundary (including beside the scrollbar). -->
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0"
+                                      Margin="0,4,0,4" Background="Transparent">
+                            <StackPanel Margin="4,0,12,10">
+                                <StackPanel Margin="2,4,0,12">
+                                    <TextBlock Text="Settings" Style="{StaticResource H1}" FontSize="22" />
+                                    <TextBlock Text="Appearance, accent colour and how random the names get."
+                                               Style="{StaticResource Meta}" Margin="0,2,0,0" />
+                                </StackPanel>
+
+                                <!-- personalisation -->
+                                <TextBlock Text="Personalisation" Style="{StaticResource H2}" Margin="2,0,0,8" />
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <TextBlock Text="App mode" Style="{StaticResource RowLabel}" FontSize="12.5"
+                                                   FontWeight="SemiBold" Margin="0,0,0,8" />
+                                        <UniformGrid Columns="3" Margin="0,0,0,14">
+                                            <RadioButton x:Name="ModeSystem" Style="{StaticResource AppearanceTile}"
+                                                         GroupName="appmode" Tag="System" Checked="AppMode_Checked"
+                                                         Margin="0,0,4,0">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Path Data="{StaticResource GeoAppModePc}" Width="22" Height="22"
+                                                          Stretch="Uniform" Margin="0,0,12,0"
+                                                          Stroke="{DynamicResource TextSecondary}" StrokeThickness="1.35"
+                                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                          StrokeLineJoin="Round" />
+                                                    <StackPanel VerticalAlignment="Center">
+                                                        <TextBlock Text="System" FontWeight="SemiBold" FontSize="13" />
+                                                        <TextBlock Text="Follows Windows" Style="{StaticResource Meta}" Margin="0,2,0,0" />
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </RadioButton>
+                                            <RadioButton x:Name="ModeLight" Style="{StaticResource AppearanceTile}"
+                                                         GroupName="appmode" Tag="Light" Checked="AppMode_Checked"
+                                                         Margin="4,0,4,0">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Path Data="{StaticResource GeoAppModeSun}" Width="22" Height="22"
+                                                          Stretch="Uniform" Margin="0,0,12,0"
+                                                          Stroke="{DynamicResource TextSecondary}" StrokeThickness="1.45"
+                                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                                                    <StackPanel VerticalAlignment="Center">
+                                                        <TextBlock Text="Light" FontWeight="SemiBold" FontSize="13" />
+                                                        <TextBlock Text="Bright surfaces" Style="{StaticResource Meta}" Margin="0,2,0,0" />
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </RadioButton>
+                                            <RadioButton x:Name="ModeDark" Style="{StaticResource AppearanceTile}"
+                                                         GroupName="appmode" Tag="Dark" Checked="AppMode_Checked"
+                                                         Margin="4,0,0,0">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <!-- A solid crescent, not a thin C-shaped outline. -->
+                                                    <Path Data="{StaticResource GeoAppModeMoon}" Width="22" Height="22"
+                                                          Stretch="Uniform" Margin="0,0,12,0"
+                                                          Fill="{DynamicResource TextSecondary}" />
+                                                    <StackPanel VerticalAlignment="Center">
+                                                        <TextBlock Text="Dark" FontWeight="SemiBold" FontSize="13" />
+                                                        <TextBlock Text="Acrylic night" Style="{StaticResource Meta}" Margin="0,2,0,0" />
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </RadioButton>
+                                        </UniformGrid>
+
+                                        <Border Height="1" Background="{DynamicResource Divider}" Margin="0,0,0,14" />
+
+                                        <TextBlock Text="Accent" Style="{StaticResource RowLabel}" FontSize="12.5"
+                                                   FontWeight="SemiBold" Margin="0,0,0,10" />
+                                        <ItemsControl x:Name="AccentList">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Width="80" Margin="0,0,6,8">
+                                                        <Button Tag="{Binding Key}" Click="Accent_Click" Cursor="Hand"
+                                                                FocusVisualStyle="{x:Null}" ToolTip="{Binding Label}">
+                                                            <Button.Template>
+                                                                <ControlTemplate TargetType="Button">
+                                                                    <Grid>
+                                                                        <Border x:Name="Ring" Width="44" Height="44"
+                                                                                CornerRadius="22" BorderThickness="2"
+                                                                                BorderBrush="{Binding RingBrush}" />
+                                                                        <Border Width="32" Height="32" CornerRadius="16"
+                                                                                Background="{Binding PreviewBrush}" />
+                                                                        <Path x:Name="Tick" Data="{StaticResource GeoCheck}"
+                                                                              Stroke="{Binding ForegroundBrush}" StrokeThickness="1.9"
+                                                                              Width="14" Height="14" Stretch="Uniform"
+                                                                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                              Opacity="{Binding TickOpacity}" />
+                                                                    </Grid>
+                                                                    <ControlTemplate.Triggers>
+                                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                                            <Setter TargetName="Ring" Property="BorderBrush"
+                                                                                    Value="{DynamicResource CardStrokeTop}" />
+                                                                        </Trigger>
+                                                                    </ControlTemplate.Triggers>
+                                                                </ControlTemplate>
+                                                            </Button.Template>
+                                                        </Button>
+                                                        <TextBlock Text="{Binding Label}" Style="{StaticResource Meta}"
+                                                                   HorizontalAlignment="Center" Margin="0,5,0,0"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- advanced -->
+                                <TextBlock Text="Advanced" Style="{StaticResource H2}" Margin="2,18,0,8" />
+                                <Border Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <Grid>
+                                            <StackPanel>
+                                                <TextBlock Text="Random length" Style="{StaticResource Body}" FontWeight="SemiBold" />
+                                                <TextBlock Text="Characters per generated name, 6 to 16."
+                                                           Style="{StaticResource Meta}" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                            <Border Background="{DynamicResource AccentSoft}" CornerRadius="5" Padding="10,3"
+                                                    HorizontalAlignment="Right" VerticalAlignment="Center">
+                                                <TextBlock x:Name="LenBadge" Text="10 chars" FontSize="12" FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource Accent}" />
+                                            </Border>
+                                        </Grid>
+                                        <Slider x:Name="AdvLength" Style="{StaticResource FluentSlider}" Minimum="6" Maximum="16"
+                                                TickFrequency="1" IsSnapToTickEnabled="True" Value="10" Margin="0,6,0,0"
+                                                ValueChanged="AdvLength_ValueChanged" />
+                                        <Grid>
+                                            <TextBlock Text="6 | shortest" Style="{StaticResource Meta}" />
+                                            <TextBlock Text="16 | maximum entropy" Style="{StaticResource Meta}"
+                                                       HorizontalAlignment="Right" />
+                                        </Grid>
+
+                                        <Border Height="0" Margin="0,12" />
+
+                                        <TextBlock Text="Character set" Style="{StaticResource Body}" FontWeight="SemiBold"
+                                                   Margin="0,0,0,10" />
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <CheckBox x:Name="CkLower" Grid.Row="0" Grid.Column="0"
+                                                      Style="{StaticResource FluentCheck}" Content="Lowercase a-z"
+                                                      Margin="0,0,0,10" Checked="Set_Changed" Unchecked="Set_Changed" />
+                                            <CheckBox x:Name="CkUpper" Grid.Row="0" Grid.Column="1"
+                                                      Style="{StaticResource FluentCheck}" Content="Uppercase A-Z"
+                                                      Margin="0,0,0,10" Checked="Set_Changed" Unchecked="Set_Changed" />
+                                            <CheckBox x:Name="CkDigits" Grid.Row="1" Grid.Column="0"
+                                                      Style="{StaticResource FluentCheck}" Content="Digits 0-9"
+                                                      Checked="Set_Changed" Unchecked="Set_Changed" />
+                                            <CheckBox x:Name="CkSymbols" Grid.Row="1" Grid.Column="1"
+                                                      Style="{StaticResource FluentCheck}" Content="Symbols - _"
+                                                      Checked="Set_Changed" Unchecked="Set_Changed" />
+                                        </Grid>
+
+                                        <Border Height="0" Margin="0,12" />
+
+                                        <Grid>
+                                            <StackPanel>
+                                                <TextBlock Text="Avoid look-alike characters" Style="{StaticResource Body}"
+                                                           FontWeight="SemiBold" />
+                                                <TextBlock Text="Drops 0/O, 1/l/I, 5/S and 2/Z so names stay readable."
+                                                           Style="{StaticResource Meta}" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                            <CheckBox x:Name="CkAvoid" Style="{StaticResource FluentSwitch}"
+                                                      HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                      Checked="Set_Changed" Unchecked="Set_Changed" />
+                                        </Grid>
+
+                                        <Border Height="0" Margin="0,12" />
+
+                                        <Grid>
+                                            <StackPanel>
+                                                <TextBlock Text="Copy new names to clipboard" Style="{StaticResource Body}"
+                                                           FontWeight="SemiBold" />
+                                                <TextBlock Text="Puts every generated name on your clipboard afterwards."
+                                                           Style="{StaticResource Meta}" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                            <CheckBox x:Name="CkClipboard" Style="{StaticResource FluentSwitch}"
+                                                      HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                      Checked="Set_Changed" Unchecked="Set_Changed" />
+                                        </Grid>
+
+                                        <Border Background="{DynamicResource AccentSoft}" CornerRadius="6" Padding="12,9"
+                                                Margin="0,14,0,0">
+                                            <StackPanel Orientation="Horizontal">
+                                                <Path Data="{StaticResource GeoInfo}" Width="15" Height="15" Stretch="Uniform"
+                                                      Stroke="{DynamicResource Accent}" StrokeThickness="1.3"
+                                                      Margin="0,0,9,0" VerticalAlignment="Top" />
+                                                <TextBlock x:Name="EntropyText" Text="" Style="{StaticResource Meta}"
+                                                           Foreground="{DynamicResource TextSecondary}"
+                                                           TextWrapping="Wrap" MaxWidth="520" />
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- about -->
+                                <TextBlock Text="About" Style="{StaticResource H2}" Margin="2,18,0,8" />
+                                <Border Style="{StaticResource Card}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <!-- A real Button makes the logo usable with mouse, Enter, and Space. -->
+                                        <Button Width="72" Height="72" VerticalAlignment="Top" Cursor="Hand"
+                                                Click="AboutLogo_Click" ToolTip="Open KnightWin on GitHub"
+                                                AutomationProperties.Name="Open KnightWin source on GitHub">
+                                            <Button.Template>
+                                                <ControlTemplate TargetType="Button">
+                                                    <Border x:Name="Bd" CornerRadius="16" Background="#F20B0E16"
+                                                            BorderBrush="{DynamicResource CardStroke}" BorderThickness="1">
+                                                        <ContentPresenter Margin="2" />
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Accent}" />
+                                                        </Trigger>
+                                                        <Trigger Property="IsKeyboardFocused" Value="True">
+                                                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Accent}" />
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Button.Template>
+                                            <Image Source="Assets/app-icon.png" IsHitTestVisible="False"
+                                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                                        </Button>
+                                        <StackPanel Grid.Column="1" Margin="16,0,0,0">
+                                            <TextBlock Text="KnightWin Randomizer" Style="{StaticResource H1}" FontSize="19" />
+                                            <TextBlock x:Name="VersionLine" Text="Version 1.0.0 | native WPF | x64"
+                                                       Style="{StaticResource Caption}" Margin="0,2,0,0" />
+                                            <TextBlock x:Name="AcrylicDiagnostic" Style="{StaticResource Meta}"
+                                                       Foreground="{DynamicResource TextSecondary}"
+                                                       Margin="0,5,0,0" TextWrapping="Wrap"
+                                                       Text="Backdrop status will appear here" />
+                                            <TextBlock Text="A precision filename randomiser for Windows 11. Renames in place, never moves or deletes, checks every batch for duplicate names, and keeps one undo step."
+                                                       Style="{StaticResource Meta}" Margin="0,8,0,0" TextWrapping="Wrap" />
+                                            <TextBlock Text="© 2026 KnightWin · GPL-3.0-only · No warranty · Source and license: click the logo"
+                                                       Style="{StaticResource Meta}" Margin="0,5,0,0" TextWrapping="Wrap" />
+                                            <WrapPanel Margin="0,12,0,0">
+                                                <Border Background="{DynamicResource ChipBg}" CornerRadius="4" Padding="8,4"
+                                                        Margin="0,0,6,4">
+                                                    <TextBlock x:Name="RuntimeLine" Text=".NET 8" Style="{StaticResource Meta}" />
+                                                </Border>
+                                                <Border Background="{DynamicResource ChipBg}" CornerRadius="4" Padding="8,4"
+                                                        Margin="0,0,6,4">
+                                                    <TextBlock Text="Native WPF" Style="{StaticResource Meta}" />
+                                                </Border>
+                                                <Border Background="{DynamicResource ChipBg}" CornerRadius="4" Padding="8,4"
+                                                        Margin="0,0,6,4" Cursor="Hand"
+                                                        MouseLeftButtonDown="MemoryChip_MouseLeftButtonDown">
+                                                    <TextBlock x:Name="MemoryLine" Text="RAM —" Style="{StaticResource Meta}" />
+                                                </Border>
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <Grid Margin="2,16,2,20">
+                                    <TextBlock x:Name="SaveHint" Text="Changes apply and save instantly"
+                                               Style="{StaticResource Meta}" VerticalAlignment="Center" />
+                                    <Button Style="{StaticResource SubButton}" Content="Reset to defaults"
+                                            HorizontalAlignment="Right" Click="Reset_Click" />
+                                </Grid>
+                            </StackPanel>
+                        </ScrollViewer>
+                        <!-- No overpainting the scroll edges: in v1.9.7 the seals were
+                             themselves visible as theme-colour lines. The transparent WPF
+                             composition target and root brush now back the entire viewport. -->
+                    </Grid>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Grid>
+        </Border>
+    </Border>
+</Window>

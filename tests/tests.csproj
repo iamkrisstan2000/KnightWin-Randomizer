@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>kwr.tests</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="../KnightWin.Randomizer/Core/RenameEngine.cs" />
+    <Compile Include="../KnightWin.Randomizer/Core/AppSettings.cs" />
+    <Compile Include="../KnightWin.Randomizer/Core/FolderScanner.cs" />
+  </ItemGroup>
+</Project>

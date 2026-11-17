@@ -6,6 +6,15 @@
 
 Give a batch of files fresh names without losing their extensions. KnightWin previews every change before you commit, keeps files in place, avoids overwrites, and offers one-step Undo. No Electron, installer, account, or separate .NET runtime needed for the release EXE.
 
+## Screenshots 
+
+<img width="2559" height="1439" alt="Screenshot 2026-11-17 202114" src="https://github.com/user-attachments/assets/36a18195-b42b-4e62-8536-dd8532874386" />
+<img width="2559" height="1439" alt="Screenshot 2026-11-17 202106" src="https://github.com/user-attachments/assets/b9d9d533-474b-4e5e-b25b-7f523855f56c" />
+<img width="2559" height="1439" alt="Screenshot 2026-11-17 202057" src="https://github.com/user-attachments/assets/759618bf-1866-48b4-b86e-db03940b2c3a" />
+<img width="2559" height="1439" alt="Screenshot 2026-11-17 202047" src="https://github.com/user-attachments/assets/838de17b-ec72-4d41-9afb-8bc47bf2ef6a" />
+<img width="2559" height="1439" alt="Screenshot 2026-11-17 202039" src="https://github.com/user-attachments/assets/de639875-afe3-479e-910b-4cbf341ad20b" />
+
+
 ## Get started
 
 1. Download `KnightWinRandomizer-v1.0.0.exe` from this project's GitHub Release. Close older versions before running it.
